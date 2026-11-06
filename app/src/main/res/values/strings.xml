@@ -1,3 +1,9 @@
 <resources>
     <string name="app_name">PiccisTodo</string>
+    <string name="shortcut_voice_create">Aggiungi cosa da fare</string>
+    <string-array name="voice_create_synonyms">
+        <item>aggiungi cosa da fare</item>
+        <item>aggiungi alla lista</item>
+        <item>nuova cosa da fare</item>
+    </string-array>
 </resources>
