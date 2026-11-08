@@ -39,6 +39,9 @@ android {
 }
 
 dependencies {
+    implementation(libs.reorderable)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.biometric)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(platform(libs.androidx.compose.bom))

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.elialombardi.piccistodo.data.model.CreateNoteRequest
 import com.elialombardi.piccistodo.data.model.NoteStyle
+import com.elialombardi.piccistodo.data.model.UpdateNoteRequest
 import com.elialombardi.piccistodo.data.repository.TodoRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,23 +20,41 @@ class CreateViewModel @Inject constructor(
     private val _isSaving = MutableStateFlow(false)
     val isSaving: StateFlow<Boolean> = _isSaving
 
-    // Changed the signature to match what your UI needs to send
-    fun saveNote(collectionId: UInt, title: String, content: String, onSuccess: () -> Unit) {
+    // UPDATED: Added optional noteId, currentPosition, and style for editing
+    fun saveNote(
+        collectionId: UInt,
+        title: String,
+        content: String,
+        noteId: UInt? = null,
+        currentPosition: Int = 0,
+        existingStyle: NoteStyle = NoteStyle(),
+        onSuccess: () -> Unit
+    ) {
         if (title.isBlank()) return
 
         viewModelScope.launch {
             _isSaving.value = true
             try {
-                // Create the request object exactly as the Go API expects it
-                val request = CreateNoteRequest(
-                    folderId = collectionId,
-                    title = title,
-                    content = content,
-                    style = NoteStyle() // Default style
-                )
-
-                // Call the repository
-                repository.createNote(request)
+                if (noteId == null) {
+                    // CREATE NEW NOTE
+                    val request = CreateNoteRequest(
+                        folderId = collectionId,
+                        title = title,
+                        content = content,
+                        style = existingStyle,
+                        position = 0 // Or whatever your API requires for new notes
+                    )
+                    repository.createNote(request)
+                } else {
+                    // EDIT EXISTING NOTE
+                    val request = UpdateNoteRequest(
+                        title = title,
+                        content = content,
+                        style = existingStyle,
+                        position = currentPosition
+                    )
+                    repository.updateNote(noteId, request)
+                }
                 onSuccess()
             } catch (e: Exception) {
                 e.printStackTrace()

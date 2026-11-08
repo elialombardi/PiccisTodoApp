@@ -5,5 +5,6 @@ data class NoteFolderTreeResponse(
     val name: String,
     val parentId: UInt?, // Nullable because top-level folders have no parent
     val children: List<NoteFolderTreeResponse>,
-    val notes: List<NoteResponse>
+    val notes: List<NoteResponse>,
+    val position: Int,
 )

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.elialombardi.piccistodo.data.model.CreateFolderRequest
 import com.elialombardi.piccistodo.data.model.NoteFolderTreeResponse
+import com.elialombardi.piccistodo.data.model.UpdateFolderRequest
 import com.elialombardi.piccistodo.data.repository.TodoRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,7 +47,35 @@ class HomeViewModel @Inject constructor(
             }
         }
     }
+    fun moveFolder(fromIndex: Int, toIndex: Int) {
+        val currentList = _folderTree.value.toMutableList()
+        if (fromIndex in currentList.indices && toIndex in currentList.indices) {
+            // 1. Move the item locally
+            val item = currentList.removeAt(fromIndex)
+            currentList.add(toIndex, item)
 
+            // 2. Update UI immediately
+            _folderTree.value = currentList
+
+            // 3. Sync to Backend
+            viewModelScope.launch {
+                try {
+                    currentList.forEachIndexed { index, folder ->
+                        if (folder.position != index) {
+                            // Assuming you have an UpdateFolderRequest and updateFolder method
+                            val request = UpdateFolderRequest(
+                                name = folder.name,
+                                position = index
+                            )
+                            repository.updateFolder(folder.id, request)
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
     fun deleteFolder(id: UInt) {
         // 1. Optimistically remove from UI
         _folderTree.value = _folderTree.value.filter { it.id != id }

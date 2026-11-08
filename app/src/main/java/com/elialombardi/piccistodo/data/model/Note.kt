@@ -1,7 +1,5 @@
 package com.elialombardi.piccistodo.data.model
 
-import com.google.gson.annotations.SerializedName
-
 data class NoteStyle(
     val bold: Boolean = false,
     val italic: Boolean = false,
@@ -13,6 +11,7 @@ data class NoteStyle(
 data class NoteResponse(
     val id: UInt,
     val folderId: UInt,
+    val position: Int,
     val title: String,
     val content: String,
     val style: NoteStyle,

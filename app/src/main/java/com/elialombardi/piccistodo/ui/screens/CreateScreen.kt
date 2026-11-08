@@ -9,6 +9,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.elialombardi.piccistodo.data.model.NoteResponse
+import com.elialombardi.piccistodo.data.model.NoteStyle
 import com.elialombardi.piccistodo.ui.viewmodels.CreateViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -17,6 +19,7 @@ fun CreateScreen(
     collectionId: UInt,
     onSaved: () -> Unit,
     onBackClick: () -> Unit,
+    noteToEdit: NoteResponse? = null, // NEW: Pass existing note if editing
     viewModel: CreateViewModel = hiltViewModel()
 ) {
     var todoTitle by remember { mutableStateOf("") }
@@ -73,7 +76,14 @@ fun CreateScreen(
             Button(
                 onClick = {
                     // CHANGED: Call saveNote and pass the content
-                    viewModel.saveNote(collectionId, todoTitle, noteContent) {
+                    viewModel.saveNote(
+                        collectionId = collectionId,
+                        title = todoTitle,
+                        content = noteContent,
+                        noteId = noteToEdit?.id, // Null if creating, ID if editing
+                        currentPosition = noteToEdit?.position ?: 0,
+                        existingStyle = noteToEdit?.style ?: NoteStyle()
+                    ) {
                         onSaved()
                     }
                 },
