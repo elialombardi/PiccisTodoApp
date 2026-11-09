@@ -37,7 +37,21 @@ class SettingsManager @Inject constructor(private val context: Context) {
     fun getTokenSync(): String? {
         if (cachedToken != null) return cachedToken
         cachedToken = runBlocking {
-            context.dataStore.data.map { it[tokenKey] }.first()
+            val stored = context.dataStore.data.map { it[tokenKey] }.first() ?: return@runBlocking null
+            try {
+                if (TokenCipher.encrypted(stored)) TokenCipher.decrypt(stored)
+                else {
+                    val encrypted = TokenCipher.encrypt(stored)
+                    context.dataStore.edit { it[tokenKey] = encrypted }
+                    stored
+                }
+            } catch (_: java.security.GeneralSecurityException) {
+                context.dataStore.edit { it.remove(tokenKey) }
+                null
+            } catch (_: IllegalArgumentException) {
+                context.dataStore.edit { it.remove(tokenKey) }
+                null
+            }
         }
         return cachedToken
     }
@@ -67,7 +81,8 @@ class SettingsManager @Inject constructor(private val context: Context) {
 
     // 5. Setters that update both DataStore and the memory cache
     suspend fun saveToken(token: String) {
-        context.dataStore.edit { prefs -> prefs[tokenKey] = token }
+        val encrypted = TokenCipher.encrypt(token)
+        context.dataStore.edit { prefs -> prefs[tokenKey] = encrypted }
         cachedToken = token
     }
 

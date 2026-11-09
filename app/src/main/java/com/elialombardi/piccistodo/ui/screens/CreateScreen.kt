@@ -1,14 +1,20 @@
 package com.elialombardi.piccistodo.ui.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.elialombardi.piccistodo.R
 import com.elialombardi.piccistodo.data.model.NoteResponse
 import com.elialombardi.piccistodo.data.model.NoteStyle
 import com.elialombardi.piccistodo.ui.viewmodels.CreateViewModel
@@ -22,17 +28,24 @@ fun CreateScreen(
     noteToEdit: NoteResponse? = null, // NEW: Pass existing note if editing
     viewModel: CreateViewModel = hiltViewModel()
 ) {
-    var todoTitle by remember { mutableStateOf("") }
-    // Optional: If you want to support notes with content, add a state for it
-    var noteContent by remember { mutableStateOf("") }
+    var todoTitle by rememberSaveable { mutableStateOf(noteToEdit?.title.orEmpty()) }
+    var noteContent by rememberSaveable { mutableStateOf(noteToEdit?.content.orEmpty()) }
+    var discard by rememberSaveable { mutableStateOf(false) }
     val isSaving by viewModel.isSaving.collectAsState()
+    val back = {
+        if (!isSaving) {
+            if (todoTitle != noteToEdit?.title.orEmpty() || noteContent != noteToEdit?.content.orEmpty()) discard = true
+            else onBackClick()
+        }
+    }
+    BackHandler { back() }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("New Note") },
                 navigationIcon = {
-                    IconButton(onClick = onBackClick) {
+                    IconButton(onClick = back, enabled = !isSaving) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back"
@@ -49,9 +62,13 @@ fun CreateScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(16.dp),
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            Text(stringResource(R.string.ui_notes_description), style = MaterialTheme.typography.titleLarge, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(24.dp))
             OutlinedTextField(
                 value = todoTitle,
                 onValueChange = { todoTitle = it },
@@ -67,7 +84,8 @@ fun CreateScreen(
                 value = noteContent,
                 onValueChange = { noteContent = it },
                 label = { Text("Content (Optional)") },
-                modifier = Modifier.fillMaxWidth().height(150.dp),
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 6,
                 enabled = !isSaving
             )
 
@@ -87,7 +105,7 @@ fun CreateScreen(
                         onSaved()
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                 enabled = todoTitle.isNotBlank() && !isSaving
             ) {
                 if (isSaving) {
@@ -98,4 +116,8 @@ fun CreateScreen(
             }
         }
     }
+    if (discard) AlertDialog(onDismissRequest = { discard = false },
+        title = { Text(stringResource(R.string.tasks_discard_title)) }, text = { Text(stringResource(R.string.tasks_discard_text)) },
+        confirmButton = { TextButton(onClick = onBackClick) { Text(stringResource(R.string.tasks_discard)) } },
+        dismissButton = { TextButton(onClick = { discard = false }) { Text(stringResource(R.string.tasks_keep_editing)) } })
 }

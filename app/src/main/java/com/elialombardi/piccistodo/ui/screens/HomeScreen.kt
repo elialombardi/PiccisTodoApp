@@ -1,29 +1,33 @@
 package com.elialombardi.piccistodo.ui.screens
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.PersonOutline
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.elialombardi.piccistodo.ui.viewmodels.HomeViewModel
+import com.elialombardi.piccistodo.R
+import com.elialombardi.piccistodo.ui.components.WorkspaceHero
+import com.elialombardi.piccistodo.ui.components.WorkspaceEmptyState
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
@@ -32,6 +36,7 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 fun HomeScreen(
     onCollectionClick: (UInt) -> Unit,
     onAddCollectionClick: () -> Unit,
+    onAccountClick: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val folders by viewModel.folderTree.collectAsState()
@@ -55,39 +60,23 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("My Collections") },
+                title = { Text(stringResource(R.string.nav_collections)) },
                 actions = {
-                    // Fake Profile Circle
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 16.dp)
-                            .size(36.dp)
-                            .background(
-                                color = MaterialTheme.colorScheme.primary, // Cyan background
-                                shape = CircleShape
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "E", // First letter of name
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    IconButton(onClick = viewModel::fetchFolders, enabled = !isLoading) { Icon(Icons.Default.Refresh, stringResource(R.string.ui_refresh)) }
+                    IconButton(onClick = onAccountClick) { Icon(Icons.Default.PersonOutline, stringResource(R.string.nav_account)) }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    containerColor = MaterialTheme.colorScheme.background
                 )
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
+            ExtendedFloatingActionButton(
                 onClick = onAddCollectionClick,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            ) {
-                Text("+", style = MaterialTheme.typography.headlineMedium)
-            }
+                icon = { Icon(Icons.Default.Add, null) },
+                text = { Text(stringResource(R.string.ui_new_collection)) },
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            )
         }
     ) { paddingValues ->
         Box(
@@ -98,17 +87,18 @@ fun HomeScreen(
             if (isLoading) {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             } else if (folders.isEmpty()) {
-                Text(
-                    text = "No folders found. Check your API.",
-                    modifier = Modifier.align(Alignment.Center)
-                )
+                WorkspaceEmptyState(stringResource(R.string.ui_collections_empty), stringResource(R.string.ui_collections_empty_description), Icons.Default.FolderOpen)
             } else {
                 LazyColumn(
                     state = listState, // Attach the state here
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    item(key = "intro") {
+                        WorkspaceHero(stringResource(R.string.ui_collections_description), stringResource(R.string.ui_collections_hint), Icons.Default.FolderOpen)
+                    }
+                    item(key = "count") { Text(stringResource(R.string.ui_collection_count, folders.size), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     // Use itemsIndexed and a String key
                     itemsIndexed(folders, key = { _, folder -> folder.id.toString() }) { index, collection ->
 
@@ -150,7 +140,7 @@ fun HomeScreen(
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Delete,
-                                            contentDescription = "Delete Collection",
+                                            contentDescription = stringResource(R.string.ui_delete_collection),
                                             tint = MaterialTheme.colorScheme.onError
                                         )
                                     }
@@ -161,9 +151,8 @@ fun HomeScreen(
                                             .fillMaxWidth()
                                             .clickable { onCollectionClick(collection.id) },
                                         colors = CardDefaults.cardColors(
-                                            containerColor = MaterialTheme.colorScheme.surface
+                                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                                         ),
-                                        border = BorderStroke(1.dp, Color(0xFF1F4B58)),
                                         elevation = CardDefaults.cardElevation(defaultElevation = elevation)
                                     ) {
                                         Row(
@@ -172,12 +161,14 @@ fun HomeScreen(
                                                 .padding(20.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(
-                                                text = collection.name,
-                                                modifier = Modifier.weight(1f),
-                                                style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
+                                            Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.secondaryContainer) {
+                                                Icon(Icons.Default.FolderOpen, null, Modifier.padding(12.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                                            }
+                                            Spacer(Modifier.width(14.dp))
+                                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                Text(collection.name, style = MaterialTheme.typography.titleMedium)
+                                                Text(stringResource(R.string.ui_note_count, collection.notes.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
 
                                             // Drag Handle for reordering
                                             IconButton(
@@ -186,7 +177,7 @@ fun HomeScreen(
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Default.Menu,
-                                                    contentDescription = "Drag to reorder",
+                                                    contentDescription = stringResource(R.string.ui_reorder),
                                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                             }

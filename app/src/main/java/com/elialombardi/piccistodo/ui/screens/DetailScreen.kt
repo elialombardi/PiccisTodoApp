@@ -2,6 +2,8 @@ package com.elialombardi.piccistodo.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -10,13 +12,19 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.elialombardi.piccistodo.R
+import com.elialombardi.piccistodo.ui.components.WorkspaceEmptyState
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.elialombardi.piccistodo.data.model.NoteResponse
 import com.elialombardi.piccistodo.ui.viewmodels.DetailViewModel
 import sh.calvin.reorderable.ReorderableItem
@@ -37,7 +45,7 @@ fun DetailScreen(
     var noteToEdit by remember { mutableStateOf<NoteResponse?>(null) }
     var showEditDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(collectionId) {
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.fetchNotesForFolder(collectionId)
     }
 
@@ -64,7 +72,7 @@ fun DetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Notes (Long-press to reorder)") },
+                title = { Text(stringResource(R.string.ui_notes)) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -74,26 +82,25 @@ fun DetailScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
+            ExtendedFloatingActionButton(
                 onClick = onAddItemClick,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            ) {
-                Text("+", style = MaterialTheme.typography.headlineMedium)
-            }
+                icon = { Icon(Icons.Default.Add, null) },
+                text = { Text(stringResource(R.string.ui_new_note)) }
+            )
         }
     ) { paddingValues ->
         if (items.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
-                Text("No notes here yet. Click + to add one.")
+                WorkspaceEmptyState(stringResource(R.string.ui_new_note), stringResource(R.string.ui_notes_description), Icons.Default.Notes)
             }
         } else {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize().padding(paddingValues),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 96.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                item(key = "intro") { Text(stringResource(R.string.ui_notes_description), color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 itemsIndexed(items, key = { _, note -> note.id.toString() }) { index, note ->
 
                     // 2. Wrap the item in ReorderableItem
@@ -140,8 +147,7 @@ fun DetailScreen(
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
                                     elevation = CardDefaults.cardElevation(defaultElevation = elevation),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1F4B58))
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(16.dp),
@@ -207,7 +213,7 @@ fun EditNoteDialog(
         onDismissRequest = onDismiss,
         title = { Text("Edit Note") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState()).imePadding()) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
@@ -219,6 +225,7 @@ fun EditNoteDialog(
                     value = content,
                     onValueChange = { content = it },
                     label = { Text("Content") },
+                    minLines = 3,
                     modifier = Modifier.fillMaxWidth()
                 )
             }

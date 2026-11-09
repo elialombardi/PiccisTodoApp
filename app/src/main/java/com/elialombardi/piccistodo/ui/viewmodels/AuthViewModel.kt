@@ -2,7 +2,6 @@ package com.elialombardi.piccistodo.ui.viewmodels
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.elialombardi.piccistodo.data.local.BiometricHelper
 import com.elialombardi.piccistodo.data.local.SettingsManager
 import com.elialombardi.piccistodo.data.model.LoginRequest
 import com.elialombardi.piccistodo.data.repository.TodoRepository
@@ -10,6 +9,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 
 @HiltViewModel
@@ -54,14 +54,7 @@ class AuthViewModel @Inject constructor(
                     _savedUrl.value = url
                 }
 
-                // --- TEMPORARY TESTING FIX ---
-                // We are inside a coroutine here, so we can call suspend functions.
-                settingsManager.setBiometricEnabled(true)
-                _biometricEnabled.value = true
-
-                // Once testing is done, delete the two lines above and uncomment the line below:
-                // _biometricEnabled.value = settingsManager.isBiometricEnabled()
-                // -----------------------------
+                _biometricEnabled.value = settingsManager.isBiometricEnabled()
 
                 _hasStoredSession.value = settingsManager.hasStoredToken()
             }
@@ -77,6 +70,7 @@ class AuthViewModel @Inject constructor(
     }
 
     fun saveUrlAndLogin(url: String, username: String, password: String, onSuccess: () -> Unit) {
+        if (_isLoading.value) return
         viewModelScope.launch {
             _isLoading.value = true
             _error.value = null
@@ -98,9 +92,12 @@ class AuthViewModel @Inject constructor(
 
                 onSuccess()
             } catch (e: Exception) {
-                println("LOGIN_ERROR: ${e.message}")
-                e.printStackTrace()
-                _error.value = "Error: ${e.message}"
+                if (e is CancellationException) throw e
+                _error.value = when (e) {
+                    is java.io.IOException -> "Cannot connect. Check your connection and server address."
+                    is retrofit2.HttpException -> if (e.code() == 401) "Incorrect username or password." else "Sign-in failed. Check your access and try again."
+                    else -> "Could not sign in. Check your server address and try again."
+                }
             } finally {
                 _isLoading.value = false
             }
@@ -135,11 +132,19 @@ class AuthViewModel @Inject constructor(
      * Persists the user's choice after they respond to the "Enable fingerprint
      * login?" dialog. Call with `true` if they accepted, `false` if they declined.
      */
-    fun handleBiometricEnrollmentChoice(enabled: Boolean) {
+    fun handleBiometricEnrollmentChoice(enabled: Boolean, onDone: () -> Unit = {}) {
+        if (_isLoading.value || !_shouldOfferBiometricEnrollment.value) return
         viewModelScope.launch {
-            settingsManager.setBiometricEnabled(enabled)
-            _biometricEnabled.value = enabled
-            _shouldOfferBiometricEnrollment.value = false
+            _isLoading.value = true
+            try {
+                settingsManager.setBiometricEnabled(enabled)
+                _biometricEnabled.value = enabled
+                _shouldOfferBiometricEnrollment.value = false
+                onDone()
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                _error.value = "Could not save your preference. Please try again."
+            } finally { _isLoading.value = false }
         }
     }
 
