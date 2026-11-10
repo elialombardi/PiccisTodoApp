@@ -56,8 +56,6 @@ fun CreateCollectionScreen(
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            WorkspaceHero(stringResource(R.string.ui_collections_description), stringResource(R.string.ui_collections_empty_description), Icons.Default.FolderOpen)
-            Spacer(Modifier.height(24.dp))
             OutlinedTextField(
                 value = collectionName,
                 onValueChange = { collectionName = it },

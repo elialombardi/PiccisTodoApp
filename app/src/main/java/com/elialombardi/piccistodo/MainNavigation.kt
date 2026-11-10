@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.WorkOutline
 import androidx.compose.material.icons.outlined.PersonOutline
+import androidx.compose.material.icons.outlined.LocalGasStation
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -16,26 +17,33 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.elialombardi.piccistodo.ui.screens.CreateCollectionScreen
-import com.elialombardi.piccistodo.ui.screens.CreateScreen
-import com.elialombardi.piccistodo.ui.screens.DetailScreen
-import com.elialombardi.piccistodo.ui.screens.HomeScreen
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.elialombardi.piccistodo.ui.viewmodels.AuthViewModel
+import com.elialombardi.piccistodo.ui.screens.NotesScreen
 import com.elialombardi.piccistodo.ui.screens.LoginScreen
 import com.elialombardi.piccistodo.ui.screens.TasksScreen
 import com.elialombardi.piccistodo.ui.screens.AccountScreen
+import com.elialombardi.piccistodo.ui.screens.FuelScreen
 
 @Composable
 fun MainNavigation(startDestination: String = "login") {
+    val auth: AuthViewModel = hiltViewModel()
+    val sessionChecked by auth.sessionChecked.collectAsState()
+    val hasSession by auth.hasStoredSession.collectAsState()
     val navController = rememberNavController()
     val entry by navController.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     var tasksRoot by rememberSaveable { mutableStateOf(true) }
-    val showNavigation = route == "home" || route == "account" || (route == "tasks" && tasksRoot)
+    var notesRoot by rememberSaveable { mutableStateOf(true) }
+    val showNavigation = (route == "home" && notesRoot) || route == "account" || route == "fuel" || (route == "tasks" && tasksRoot)
     val signedOut = {
         navController.navigate("login") {
             popUpTo(navController.graph.id) { inclusive = true }
             launchSingleTop = true
         }
+    }
+    LaunchedEffect(sessionChecked, hasSession, route) {
+        if (sessionChecked && !hasSession && route != null && route != "login") signedOut()
     }
     val openSection: (String) -> Unit = { target ->
         if (route != target) navController.navigate(target) {
@@ -50,6 +58,7 @@ fun MainNavigation(startDestination: String = "login") {
           modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
         composable("login") {
             LoginScreen(
+                viewModel = auth,
                 onLoginSuccess = {
                     navController.navigate("home") {
                         popUpTo(navController.graph.id) { inclusive = true }
@@ -59,15 +68,7 @@ fun MainNavigation(startDestination: String = "login") {
             )
         }
         composable("home") {
-            HomeScreen(
-                onAccountClick = { openSection("account") },
-                onCollectionClick = { collectionId ->
-                    navController.navigate("detail/$collectionId")
-                },
-                onAddCollectionClick = {
-                    navController.navigate("create_collection")
-                }
-            )
+            NotesScreen(onAuthenticationRequired = signedOut, onRootChanged = { notesRoot = it })
         }
 
         composable("tasks") {
@@ -79,14 +80,10 @@ fun MainNavigation(startDestination: String = "login") {
             )
         }
         composable("account") { AccountScreen(onSignedOut = signedOut) }
+        composable("fuel") { FuelScreen(onAuthenticationRequired = signedOut) }
 
         composable("create_collection") {
-            CreateCollectionScreen(
-                onBackClick = { navController.popBackStack() },
-                onSaved = {
-                    navController.popBackStack()
-                }
-            )
+            NotesScreen(onAuthenticationRequired = signedOut, initialFolderForm = true)
         }
 
         composable(
@@ -94,15 +91,7 @@ fun MainNavigation(startDestination: String = "login") {
             arguments = listOf(navArgument("collectionId") { type = NavType.StringType })
         ) { backStackEntry ->
             val collectionIdString = backStackEntry.arguments?.getString("collectionId") ?: "0"
-            val collectionId = collectionIdString.toUIntOrNull() ?: 0u
-
-            DetailScreen(
-                collectionId = collectionId,
-                onAddItemClick = {
-                    navController.navigate("create?collectionId=$collectionId")
-                },
-                onBackClick = { navController.popBackStack() }
-            )
+            NotesScreen(onAuthenticationRequired = signedOut, initialFolderId = collectionIdString.toLongOrNull()?.takeIf { it > 0 })
         }
 
         composable(
@@ -113,13 +102,7 @@ fun MainNavigation(startDestination: String = "login") {
             })
         ) { backStackEntry ->
             val collectionIdString = backStackEntry.arguments?.getString("collectionId") ?: "0"
-            val collectionId = collectionIdString.toUIntOrNull() ?: 0u
-
-            CreateScreen(
-                collectionId = collectionId,
-                onSaved = { navController.popBackStack() },
-                onBackClick = { navController.popBackStack() }
-            )
+            NotesScreen(onAuthenticationRequired = signedOut, initialFolderId = collectionIdString.toLongOrNull()?.takeIf { it > 0 }, initialCreate = true)
         }
       }
     }
@@ -129,8 +112,9 @@ fun MainNavigation(startDestination: String = "login") {
 internal fun WorkspaceNavigation(selected: String, onSelect: (String) -> Unit) {
     NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         listOf(
-            Triple("home", R.string.nav_collections, Icons.Outlined.FolderOpen),
+            Triple("home", R.string.notes_title, Icons.Outlined.FolderOpen),
             Triple("tasks", R.string.tasks_title, Icons.Outlined.WorkOutline),
+            Triple("fuel", R.string.fuel_title, Icons.Outlined.LocalGasStation),
             Triple("account", R.string.nav_account, Icons.Outlined.PersonOutline)
         ).forEach { (route, label, icon) ->
             NavigationBarItem(selected = selected == route, onClick = { onSelect(route) },

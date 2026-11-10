@@ -95,9 +95,6 @@ fun HomeScreen(
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    item(key = "intro") {
-                        WorkspaceHero(stringResource(R.string.ui_collections_description), stringResource(R.string.ui_collections_hint), Icons.Default.FolderOpen)
-                    }
                     item(key = "count") { Text(stringResource(R.string.ui_collection_count, folders.size), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     // Use itemsIndexed and a String key
                     itemsIndexed(folders, key = { _, folder -> folder.id.toString() }) { index, collection ->

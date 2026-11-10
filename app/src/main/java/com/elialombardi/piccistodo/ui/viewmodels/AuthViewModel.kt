@@ -3,11 +3,13 @@ package com.elialombardi.piccistodo.ui.viewmodels
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.elialombardi.piccistodo.data.local.SettingsManager
+import com.elialombardi.piccistodo.data.local.LoginSession
 import com.elialombardi.piccistodo.data.model.LoginRequest
 import com.elialombardi.piccistodo.data.repository.TodoRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
@@ -37,6 +39,8 @@ class AuthViewModel @Inject constructor(
 
     private val _hasStoredSession = MutableStateFlow(false)
     val hasStoredSession: StateFlow<Boolean> = _hasStoredSession
+    private val _sessionChecked = MutableStateFlow(false)
+    val sessionChecked: StateFlow<Boolean> = _sessionChecked
 
     /**
      * Emits true once after a fresh successful password login when we should
@@ -54,10 +58,34 @@ class AuthViewModel @Inject constructor(
                     _savedUrl.value = url
                 }
 
-                _biometricEnabled.value = settingsManager.isBiometricEnabled()
-
-                _hasStoredSession.value = settingsManager.hasStoredToken()
+                settingsManager.loginSessionFlow.collect { applySession(it) }
             }
+    }
+
+    private suspend fun applySession(session: LoginSession): Boolean {
+        _hasStoredSession.value = session.usable
+        _biometricEnabled.value = session.usable && session.biometricEnabled
+        _sessionChecked.value = true
+        if (!session.usable) {
+            _shouldOfferBiometricEnrollment.value = false
+            if (session.hasToken) {
+                _error.value = "Session expired. Enter your username and password to sign in again."
+                settingsManager.clearSession()
+            }
+        }
+        return session.usable
+    }
+
+    fun refreshSession() {
+        viewModelScope.launch { applySession(settingsManager.loginSessionFlow.first()) }
+    }
+
+    fun requestBiometricLogin(showPrompt: () -> Unit) {
+        if (_isLoading.value) return
+        viewModelScope.launch {
+            if (applySession(settingsManager.loginSessionFlow.first()) && _biometricEnabled.value && _biometricAvailable.value)
+                showPrompt()
+        }
     }
 
     /**
@@ -79,7 +107,7 @@ class AuthViewModel @Inject constructor(
 
                 val response = repository.login(LoginRequest(username, password))
 
-                settingsManager.saveToken(response.token)
+                settingsManager.saveToken(response.token, response.role)
 
                 // Refresh session state
                 _hasStoredSession.value = true
@@ -112,10 +140,9 @@ class AuthViewModel @Inject constructor(
     fun onBiometricSuccess(onSuccess: () -> Unit) {
         viewModelScope.launch {
             _error.value = null
-            // Defensive: if somehow the token was cleared mid-session, fail safe
-            if (!settingsManager.hasStoredToken()) {
-                _hasStoredSession.value = false
-                _error.value = "Session expired. Please log in again."
+            // Fingerprint unlocks a valid stored session; it cannot renew a JWT.
+            if (!applySession(settingsManager.loginSessionFlow.first()) || !_biometricEnabled.value) {
+                _error.value = "Session expired. Enter your username and password to sign in again."
                 return@launch
             }
             onSuccess()

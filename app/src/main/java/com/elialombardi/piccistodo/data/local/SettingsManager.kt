@@ -14,11 +14,14 @@ import javax.inject.Singleton
 
 private val Context.dataStore by preferencesDataStore(name = "user_prefs")
 
+data class LoginSession(val hasToken: Boolean, val usable: Boolean, val biometricEnabled: Boolean)
+
 @Singleton
 class SettingsManager @Inject constructor(private val context: Context) {
 
     // 1. Keys
     private val tokenKey = stringPreferencesKey("jwt_token")
+    private val roleKey = stringPreferencesKey("session_role")
     private val apiUrlKey = stringPreferencesKey("api_url")
     private val biometricEnabledKey = booleanPreferencesKey("biometric_enabled")
 
@@ -29,9 +32,19 @@ class SettingsManager @Inject constructor(private val context: Context) {
 
     // 3. Flows for the UI
     val apiUrlFlow: Flow<String?> = context.dataStore.data.map { it[apiUrlKey] }
+    // Opaque encrypted-token identity: never display or log this value.
+    val sessionFlow = context.dataStore.data.map { Triple(it[tokenKey], it[apiUrlKey], it[roleKey]) }
 
     val biometricEnabledFlow: Flow<Boolean> = context.dataStore.data
         .map { it[biometricEnabledKey] ?: false }
+
+    val loginSessionFlow: Flow<LoginSession> = context.dataStore.data.map { prefs ->
+        val stored = prefs[tokenKey]
+        val token = runCatching {
+            if (stored != null && TokenCipher.encrypted(stored)) TokenCipher.decrypt(stored) else stored
+        }.getOrNull()
+        LoginSession(stored != null, JwtSession.usable(token), prefs[biometricEnabledKey] ?: false)
+    }
 
     // 4. Sync getters (same pattern as getTokenSync / getApiUrlSync)
     fun getTokenSync(): String? {
@@ -80,9 +93,12 @@ class SettingsManager @Inject constructor(private val context: Context) {
     fun hasStoredToken(): Boolean = getTokenSync()?.isNotBlank() == true
 
     // 5. Setters that update both DataStore and the memory cache
-    suspend fun saveToken(token: String) {
+    suspend fun saveToken(token: String, role: String? = null) {
         val encrypted = TokenCipher.encrypt(token)
-        context.dataStore.edit { prefs -> prefs[tokenKey] = encrypted }
+        context.dataStore.edit { prefs ->
+            prefs[tokenKey] = encrypted
+            if (role == null) prefs.remove(roleKey) else prefs[roleKey] = role
+        }
         cachedToken = token
     }
 
@@ -97,8 +113,27 @@ class SettingsManager @Inject constructor(private val context: Context) {
     }
 
     suspend fun clearToken() {
-        context.dataStore.edit { prefs -> prefs.remove(tokenKey) }
-        cachedToken = null
+        clearSession()
+    }
+
+    suspend fun clearRejectedToken(rejected: String) {
+        var cleared = false
+        context.dataStore.edit { prefs ->
+            val stored = prefs[tokenKey]
+            val current = runCatching {
+                if (stored != null && TokenCipher.encrypted(stored)) TokenCipher.decrypt(stored) else stored
+            }.getOrNull()
+            if (current == rejected) {
+                prefs.remove(tokenKey)
+                prefs.remove(roleKey)
+                prefs[biometricEnabledKey] = false
+                cleared = true
+            }
+        }
+        if (cleared) {
+            cachedToken = null
+            cachedBiometricEnabled = false
+        }
     }
 
     /**
@@ -109,6 +144,7 @@ class SettingsManager @Inject constructor(private val context: Context) {
     suspend fun clearSession() {
         context.dataStore.edit { prefs ->
             prefs.remove(tokenKey)
+            prefs.remove(roleKey)
             prefs[biometricEnabledKey] = false
         }
         cachedToken = null

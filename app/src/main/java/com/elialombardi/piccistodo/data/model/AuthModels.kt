@@ -8,5 +8,6 @@ data class LoginRequest(
 )
 
 data class TokenResponse(
-    @SerializedName("access_token") val token: String // Add SerializedName if the Go API uses a different key
+    @SerializedName("access_token") val token: String,
+    val role: String? = null
 )

@@ -27,6 +27,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.elialombardi.piccistodo.R
 import com.elialombardi.piccistodo.data.local.BiometricHelper
 import com.elialombardi.piccistodo.ui.components.WorkspaceHero
@@ -58,6 +60,7 @@ fun LoginScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
     val activity = context.findActivity()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshSession() }
 
     // 3. Register biometric availability once we have the activity
     LaunchedEffect(activity) {
@@ -78,22 +81,26 @@ fun LoginScreen(
             hasStoredSession
         ) {
             autoPromptAttempted = true
-            BiometricHelper(activity).authenticate(
-                onSuccess = { viewModel.onBiometricSuccess(onLoginSuccess) },
-                onError = { msg -> viewModel.onBiometricError(msg) },
-                onFailed = { /* user can retry from the same prompt */ }
-            )
+            viewModel.requestBiometricLogin {
+                BiometricHelper(activity).authenticate(
+                    onSuccess = { viewModel.onBiometricSuccess(onLoginSuccess) },
+                    onError = { msg -> viewModel.onBiometricError(msg) },
+                    onFailed = { /* user can retry from the same prompt */ }
+                )
+            }
         }
     }
 
     // 5. Helper to trigger the biometric prompt on demand
     val performBiometricLogin = {
-        if (activity != null && biometricAvailable && hasStoredSession) {
-            BiometricHelper(activity).authenticate(
-                onSuccess = { viewModel.onBiometricSuccess(onLoginSuccess) },
-                onError = { msg -> viewModel.onBiometricError(msg) },
-                onFailed = { /* no-op; prompt stays open */ }
-            )
+        if (activity != null && biometricAvailable && biometricEnabled && hasStoredSession) {
+            viewModel.requestBiometricLogin {
+                BiometricHelper(activity).authenticate(
+                    onSuccess = { viewModel.onBiometricSuccess(onLoginSuccess) },
+                    onError = { msg -> viewModel.onBiometricError(msg) },
+                    onFailed = { /* no-op; prompt stays open */ }
+                )
+            }
         }
     }
 
@@ -143,7 +150,6 @@ internal fun LoginContent(server: String, username: String, password: String, lo
         Box(Modifier.fillMaxSize().padding(padding).imePadding(), contentAlignment = Alignment.TopCenter) {
             Column(Modifier.widthIn(max = 560.dp).fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
                 Text(stringResource(R.string.ui_brand), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                WorkspaceHero(stringResource(R.string.ui_welcome), stringResource(R.string.ui_welcome_description), Icons.Default.SpaceDashboard)
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest)) {
                     Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text(stringResource(R.string.ui_sign_in), style = MaterialTheme.typography.headlineSmall)
