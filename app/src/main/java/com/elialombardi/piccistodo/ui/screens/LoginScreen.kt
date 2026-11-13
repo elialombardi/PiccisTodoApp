@@ -30,7 +30,6 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.elialombardi.piccistodo.R
-import com.elialombardi.piccistodo.data.local.BiometricHelper
 import com.elialombardi.piccistodo.ui.components.WorkspaceHero
 import com.elialombardi.piccistodo.ui.viewmodels.AuthViewModel
 
@@ -41,104 +40,29 @@ fun LoginScreen(
     onLoginSuccess: () -> Unit,
     viewModel: AuthViewModel = hiltViewModel()
 ) {
-    // 1. Collect state from the ViewModel
-    val savedUrl by viewModel.savedUrl.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
-    val biometricAvailable by viewModel.biometricAvailable.collectAsState()
-    val biometricEnabled by viewModel.biometricEnabled.collectAsState()
-    val hasStoredSession by viewModel.hasStoredSession.collectAsState()
-    val shouldOfferEnrollment by viewModel.shouldOfferBiometricEnrollment.collectAsState()
-
-    // 2. Local form state
-    var serverUrl by rememberSaveable { mutableStateOf("https://") }
-    LaunchedEffect(savedUrl) { if (serverUrl == "https://" && savedUrl.isNotBlank()) serverUrl = savedUrl }
-    var username by rememberSaveable { mutableStateOf("") }
+    val hasKey by viewModel.hasKey.collectAsState()
+    val serverUrl by viewModel.serverUrl.collectAsState()
+    // Neither credentials nor registration JWTs enter saved instance state.
+    var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var enrollmentPending by rememberSaveable { mutableStateOf(false) }
-
     val keyboardController = LocalSoftwareKeyboardController.current
-    val context = LocalContext.current
-    val activity = context.findActivity()
+    val activity = LocalContext.current.findActivity()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshSession() }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { password = ""; viewModel.cancelLogin() }
+    DisposableEffect(viewModel) { onDispose { viewModel.cancelLogin() } }
 
-    // 3. Register biometric availability once we have the activity
-    LaunchedEffect(activity) {
-        if (activity != null) {
-            viewModel.checkBiometricAvailability(
-                BiometricHelper(activity).isBiometricAvailable()
-            )
-        }
-    }
-
-    // 4. Auto-prompt on cold start when a session + biometrics are already set up
-    var autoPromptAttempted by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(activity, biometricAvailable, biometricEnabled, hasStoredSession) {
-        if (!autoPromptAttempted &&
-            activity != null &&
-            biometricAvailable &&
-            biometricEnabled &&
-            hasStoredSession
-        ) {
-            autoPromptAttempted = true
-            viewModel.requestBiometricLogin {
-                BiometricHelper(activity).authenticate(
-                    onSuccess = { viewModel.onBiometricSuccess(onLoginSuccess) },
-                    onError = { msg -> viewModel.onBiometricError(msg) },
-                    onFailed = { /* user can retry from the same prompt */ }
-                )
+    LoginContent(serverUrl, username, password, isLoading, error?.message,
+        hasKey, viewModel::updateServerUrl, { username = it }, { password = it },
+        onLogin = {
+            keyboardController?.hide()
+            if (activity != null && username.isNotBlank() && password.isNotBlank() && !isLoading) {
+                viewModel.enroll(activity, username, password, onLoginSuccess)
+                password = ""
             }
-        }
-    }
-
-    // 5. Helper to trigger the biometric prompt on demand
-    val performBiometricLogin = {
-        if (activity != null && biometricAvailable && biometricEnabled && hasStoredSession) {
-            viewModel.requestBiometricLogin {
-                BiometricHelper(activity).authenticate(
-                    onSuccess = { viewModel.onBiometricSuccess(onLoginSuccess) },
-                    onError = { msg -> viewModel.onBiometricError(msg) },
-                    onFailed = { /* no-op; prompt stays open */ }
-                )
-            }
-        }
-    }
-
-    // 6. Helper to trigger password login
-    val performLogin = {
-        keyboardController?.hide()
-        if (serverUrl.isNotBlank() && username.isNotBlank() && password.isNotBlank() && !isLoading) {
-            viewModel.saveUrlAndLogin(serverUrl, username, password) {
-                if (viewModel.shouldOfferBiometricEnrollment.value) enrollmentPending = true
-                else onLoginSuccess()
-            }
-        }
-    }
-
-    // 7. Enrollment dialog: shown once after the first successful password login
-    if (shouldOfferEnrollment && enrollmentPending) {
-        AlertDialog(
-            onDismissRequest = { viewModel.handleBiometricEnrollmentChoice(false, onLoginSuccess) },
-            title = { Text(stringResource(R.string.ui_biometric_title)) },
-            text = {
-                Text(stringResource(R.string.ui_biometric_enroll))
-            },
-            confirmButton = {
-                TextButton(onClick = { viewModel.handleBiometricEnrollmentChoice(true, onLoginSuccess) }) {
-                    Text(stringResource(R.string.ui_enable))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { viewModel.handleBiometricEnrollmentChoice(false, onLoginSuccess) }) {
-                    Text(stringResource(R.string.ui_not_now))
-                }
-            }
-        )
-    }
-
-    LoginContent(serverUrl, username, password, isLoading, error,
-        biometricAvailable && biometricEnabled && hasStoredSession,
-        { serverUrl = it }, { username = it }, { password = it }, performLogin, performBiometricLogin)
+        },
+        onBiometric = { if (activity != null) viewModel.signIn(activity, onLoginSuccess) })
 }
 
 @Composable
@@ -168,8 +92,9 @@ internal fun LoginContent(server: String, username: String, password: String, lo
                         if (error != null) Text(error, color = MaterialTheme.colorScheme.error)
                         Button(onClick = onLogin, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), enabled = !loading && server.isNotBlank() && username.isNotBlank() && password.isNotBlank()) {
                             if (loading) CircularProgressIndicator(Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
-                            else Text(stringResource(R.string.ui_sign_in))
+                            else Text("Register device and sign in")
                         }
+                        Text("Your password is used only to register this device. Biometric sign-in requests a new session; no JWT is saved on this device.", style = MaterialTheme.typography.bodySmall)
                         if (biometric) OutlinedButton(onClick = onBiometric, enabled = !loading, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
                             Icon(Icons.Default.Fingerprint, null); Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.ui_biometric_login))
                         }

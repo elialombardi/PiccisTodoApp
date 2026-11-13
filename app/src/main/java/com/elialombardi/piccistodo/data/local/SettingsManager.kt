@@ -5,10 +5,21 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.elialombardi.piccistodo.BuildConfig
+import com.elialombardi.piccistodo.auth.TokenHolder
+import com.elialombardi.piccistodo.auth.ServerUrl
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -24,130 +35,88 @@ class SettingsManager @Inject constructor(private val context: Context) {
     private val roleKey = stringPreferencesKey("session_role")
     private val apiUrlKey = stringPreferencesKey("api_url")
     private val biometricEnabledKey = booleanPreferencesKey("biometric_enabled")
+    private val urlMutex = Mutex()
+    @Volatile private var cachedApiUrl: String? = null
 
-    // 2. In-memory caches
-    private var cachedToken: String? = null
-    private var cachedApiUrl: String? = null
-    private var cachedBiometricEnabled: Boolean? = null
+    // Migration deletes legacy encrypted/plaintext JWTs without ever loading them.
+    init {
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            context.dataStore.edit { it.remove(tokenKey); it.remove(roleKey) }
+            getApiUrl()
+        }
+    }
 
     // 3. Flows for the UI
-    val apiUrlFlow: Flow<String?> = context.dataStore.data.map { it[apiUrlKey] }
-    // Opaque encrypted-token identity: never display or log this value.
-    val sessionFlow = context.dataStore.data.map { Triple(it[tokenKey], it[apiUrlKey], it[roleKey]) }
+    val apiUrlFlow: Flow<String> = context.dataStore.data.map {
+        it[apiUrlKey]?.let(ServerUrl::normalize) ?: BuildConfig.BASE_URL
+    }
+    val sessionFlow = combine(TokenHolder.session, apiUrlFlow) { session, url ->
+        Triple(session?.accessToken, url, session?.role)
+    }
 
     val biometricEnabledFlow: Flow<Boolean> = context.dataStore.data
         .map { it[biometricEnabledKey] ?: false }
 
-    val loginSessionFlow: Flow<LoginSession> = context.dataStore.data.map { prefs ->
-        val stored = prefs[tokenKey]
-        val token = runCatching {
-            if (stored != null && TokenCipher.encrypted(stored)) TokenCipher.decrypt(stored) else stored
-        }.getOrNull()
-        LoginSession(stored != null, JwtSession.usable(token), prefs[biometricEnabledKey] ?: false)
+    val loginSessionFlow: Flow<LoginSession> = combine(TokenHolder.signedIn, biometricEnabledFlow) { _, enabled ->
+        val usable = TokenHolder.accessToken != null
+        LoginSession(usable, usable, enabled)
     }
 
     // 4. Sync getters (same pattern as getTokenSync / getApiUrlSync)
     fun getTokenSync(): String? {
-        if (cachedToken != null) return cachedToken
-        cachedToken = runBlocking {
-            val stored = context.dataStore.data.map { it[tokenKey] }.first() ?: return@runBlocking null
-            try {
-                if (TokenCipher.encrypted(stored)) TokenCipher.decrypt(stored)
-                else {
-                    val encrypted = TokenCipher.encrypt(stored)
-                    context.dataStore.edit { it[tokenKey] = encrypted }
-                    stored
-                }
-            } catch (_: java.security.GeneralSecurityException) {
-                context.dataStore.edit { it.remove(tokenKey) }
-                null
-            } catch (_: IllegalArgumentException) {
-                context.dataStore.edit { it.remove(tokenKey) }
-                null
-            }
-        }
-        return cachedToken
+        return TokenHolder.accessToken
     }
 
-    fun getApiUrlSync(): String? {
-        if (cachedApiUrl != null) return cachedApiUrl
-        cachedApiUrl = runBlocking {
-            context.dataStore.data.map { it[apiUrlKey] }.first()
+    // Login awaits getApiUrl/saveApiUrl before any authenticated client is used.
+    fun getApiUrlSync(): String = cachedApiUrl ?: BuildConfig.BASE_URL
+
+    suspend fun getApiUrl(): String = withContext(Dispatchers.IO) {
+        urlMutex.withLock {
+            cachedApiUrl ?: apiUrlFlow.first().also { cachedApiUrl = it }
         }
-        return cachedApiUrl
     }
 
-    /**
-     * Boolean pref — note that we use `Boolean?` in the cache so we can
-     * distinguish "not yet loaded" (null) from "loaded and false".
-     */
-    fun isBiometricEnabled(): Boolean {
-        cachedBiometricEnabled?.let { return it }
-        val loaded = runBlocking {
-            context.dataStore.data.map { it[biometricEnabledKey] ?: false }.first()
-        }
-        cachedBiometricEnabled = loaded
-        return loaded
-    }
+    @Synchronized
+    fun getTokenForUrl(url: HttpUrl): String? =
+        if (ServerUrl.origin(url) == getApiUrlSync()) TokenHolder.accessToken else null
 
     fun hasStoredToken(): Boolean = getTokenSync()?.isNotBlank() == true
 
-    // 5. Setters that update both DataStore and the memory cache
-    suspend fun saveToken(token: String, role: String? = null) {
-        val encrypted = TokenCipher.encrypt(token)
-        context.dataStore.edit { prefs ->
-            prefs[tokenKey] = encrypted
-            if (role == null) prefs.remove(roleKey) else prefs[roleKey] = role
-        }
-        cachedToken = token
-    }
-
     suspend fun saveApiUrl(url: String) {
-        context.dataStore.edit { prefs -> prefs[apiUrlKey] = url }
-        cachedApiUrl = url
+        val normalized = requireNotNull(ServerUrl.normalize(url)) { ServerUrl.validationMessage }
+        withContext(Dispatchers.IO) {
+            urlMutex.withLock {
+                val previous = cachedApiUrl ?: apiUrlFlow.first()
+                context.dataStore.edit { prefs -> prefs[apiUrlKey] = normalized }
+                synchronized(this@SettingsManager) {
+                    if (previous != normalized) TokenHolder.clear()
+                    cachedApiUrl = normalized
+                }
+            }
+        }
     }
 
     suspend fun setBiometricEnabled(enabled: Boolean) {
         context.dataStore.edit { prefs -> prefs[biometricEnabledKey] = enabled }
-        cachedBiometricEnabled = enabled
     }
 
     suspend fun clearToken() {
         clearSession()
     }
 
-    suspend fun clearRejectedToken(rejected: String) {
-        var cleared = false
-        context.dataStore.edit { prefs ->
-            val stored = prefs[tokenKey]
-            val current = runCatching {
-                if (stored != null && TokenCipher.encrypted(stored)) TokenCipher.decrypt(stored) else stored
-            }.getOrNull()
-            if (current == rejected) {
-                prefs.remove(tokenKey)
-                prefs.remove(roleKey)
-                prefs[biometricEnabledKey] = false
-                cleared = true
-            }
-        }
-        if (cleared) {
-            cachedToken = null
-            cachedBiometricEnabled = false
-        }
+    fun clearRejectedToken(rejected: String) {
+        TokenHolder.clearRejected(rejected)
     }
 
     /**
-     * Full logout: clears the token AND disables biometric auto-login.
-     * Without this, a stale biometric flag could re-authenticate against a
-     * null token, or worse, log the next user into the previous session.
+     * Logout clears RAM, not the registered device key. Future biometric login
+     * must obtain a fresh single-use challenge and a newly issued server token.
      */
     suspend fun clearSession() {
+        TokenHolder.clear()
         context.dataStore.edit { prefs ->
             prefs.remove(tokenKey)
             prefs.remove(roleKey)
-            prefs[biometricEnabledKey] = false
         }
-        cachedToken = null
-        cachedBiometricEnabled = false
     }
 }

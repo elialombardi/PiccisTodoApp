@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="fuel_title">Fuel Manager</string>
+    <string name="fuel_gpl">GPL</string>
+    <string name="fuel_benzina">Benzina</string>
+    <string name="fuel_refresh">Refresh fuel overview</string>
+    <string name="fuel_retry">Retry refresh</string>
+    <string name="fuel_more">More fuel actions</string>
+    <string name="fuel_due">Benzina is required before recording more GPL fills.</string>
+    <plurals name="fuel_remaining">
+        <item quantity="one">Record %d more GPL fill before Benzina.</item>
+        <item quantity="other">Record %d more GPL fills before Benzina.</item>
+    </plurals>
+    <string name="fuel_total">Total fills: %1$d</string>
+    <string name="fuel_gpl_count">GPL fills: %1$d</string>
+    <string name="fuel_benzina_count">Benzina fills: %1$d</string>
+    <string name="fuel_remaining_count">GPL fills until Benzina: %1$d</string>
+    <string name="fuel_add_gpl">Add GPL fill</string>
+    <string name="fuel_add_benzina">Add Benzina fill</string>
+    <string name="fuel_history">Your fuel history</string>
+    <string name="fuel_empty">No fuel records yet.</string>
+    <string name="fuel_empty_initial">No fuel records yet. Record your first GPL fill.</string>
+    <string name="fuel_loading">Loading fuel overview…</string>
+    <string name="fuel_saving">Saving… Please wait.</string>
+    <string name="fuel_stats_error">Statistics could not be refreshed. Fill actions are unavailable.</string>
+    <string name="fuel_history_error">History could not be refreshed. Any displayed records may be stale.</string>
+    <string name="fuel_stale">Overview is stale. Refresh before recording another fill.</string>
+    <string name="fuel_created">Fill saved.</string>
+    <string name="fuel_saved_refresh_failed">Fill saved, but the overview could not refresh. Retry refresh, not the fill.</string>
+    <string name="fuel_deleted">Fuel record deleted.</string>
+    <string name="fuel_reset_done">Your fuel history was deleted.</string>
+    <string name="fuel_uncertain">The request outcome is uncertain; it may already have completed. Refresh and review your history before deciding whether another operation is needed. Nothing will be automatically resubmitted.</string>
+    <string name="fuel_reviewed">I reviewed the refreshed history</string>
+    <string name="fuel_delete">Delete fuel record</string>
+    <string name="fuel_reset">Reset my fuel history</string>
+    <string name="fuel_delete_title">Delete this fuel record?</string>
+    <string name="fuel_delete_message">%1$s · %2$s\nThis cannot be undone and may change the next fill.</string>
+    <string name="fuel_reset_title">Delete all your fuel records?</string>
+    <string name="fuel_reset_message">This deletes only your own history and cannot be undone. Your counts will return to zero and your cycle will restart with four GPL fills before Benzina.</string>
+    <string name="fuel_confirm_delete">Delete</string>
+    <string name="fuel_cancel">Cancel</string>
+    <string name="fuel_error_validation">The fill request was rejected. Refresh and try again.</string>
+    <string name="fuel_error_gpl_blocked">You must record Benzina before adding more GPL fills.</string>
+    <plurals name="fuel_error_benzina_blocked">
+        <item quantity="one">You must record %d more GPL fill before Benzina.</item>
+        <item quantity="other">You must record %d more GPL fills before Benzina.</item>
+    </plurals>
+    <string name="fuel_error_auth">Your session expired. Sign in again.</string>
+    <string name="fuel_error_forbidden">Only an Admin can delete fuel records. Your permissions may have changed.</string>
+    <string name="fuel_error_missing">This record is no longer available. Refreshing your history.</string>
+    <string name="fuel_error_network">Could not connect. Check your connection and refresh.</string>
+    <string name="fuel_error_server">The server could not complete the request. Please refresh and try again.</string>
+    <string name="fuel_error_data">Fuel data is invalid or changed during loading. Refresh to get a current overview.</string>
+    <string name="fuel_error_config">Check your configured HTTPS server address.</string>
+</resources>

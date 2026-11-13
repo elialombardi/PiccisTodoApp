@@ -18,13 +18,19 @@ android {
         versionCode = 1
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Override with -PBASE_URL=https://your-backend.example/ (HTTPS only).
+        val baseUrl = providers.gradleProperty("BASE_URL").orElse("https://example.invalid/").get()
+        require(baseUrl.startsWith("https://") && !baseUrl.contains('"') && !baseUrl.contains('\\'))
+        buildConfigField("String", "BASE_URL", "\"${baseUrl.trimEnd('/')}/\"")
     }
 
     buildTypes {
         release {
             optimization {
-                enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
+                // Scoped optimization repackaged a Kotlin subclass outside its
+                // package-private parent's package, causing IllegalAccessError on startup.
+                // Keep disabled until an optimizer update is verified on a device.
+                enable = false
             }
         }
     }
@@ -35,6 +41,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -51,6 +58,8 @@ dependencies {
     implementation(libs.reorderable)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.biometric)
+    implementation("androidx.security:security-crypto:1.1.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(platform(libs.androidx.compose.bom))
@@ -67,6 +76,8 @@ dependencies {
     // Reference libraries from the version catalog using libs.xxx
     implementation(libs.retrofit)
     implementation(libs.retrofit.gson)
+    implementation("com.squareup.retrofit2:converter-moshi:3.0.0")
+    implementation("com.squareup.moshi:moshi-kotlin:1.15.2")
     implementation(libs.okhttp.logging)
 
     implementation(libs.hilt.android)

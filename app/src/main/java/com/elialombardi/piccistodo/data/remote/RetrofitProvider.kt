@@ -1,7 +1,6 @@
 package com.elialombardi.piccistodo.data.remote
 
 import com.elialombardi.piccistodo.data.local.SettingsManager
-import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.util.concurrent.TimeUnit
@@ -21,8 +20,8 @@ class RetrofitProvider @Inject constructor(
 
     @Synchronized
     fun <T> getService(service: Class<T>): T {
-        // Get the URL the user saved
-        val url = settingsManager.getApiUrlSync() ?: throw IllegalStateException("API URL not configured")
+        // Same saved origin as biometric registration; rebuild when the user changes it.
+        val url = settingsManager.getApiUrlSync()
 
         // If the URL changed, or we haven't built it yet, rebuild Retrofit
         if (cachedRetrofit == null || cachedUrl != url) {
@@ -32,17 +31,18 @@ class RetrofitProvider @Inject constructor(
             val okHttpClient = OkHttpClient.Builder()
                 .retryOnConnectionFailure(false)
                 .followRedirects(false)
+                .followSslRedirects(false)
                 .callTimeout(30, TimeUnit.SECONDS)
                 .addInterceptor { chain ->
                     val isLogin = chain.request().url.encodedPath.endsWith("/auth/login")
-                    val token = if (isLogin) null else settingsManager.getTokenSync()
+                    val token = if (isLogin) null else settingsManager.getTokenForUrl(chain.request().url)
                     val request = chain.request().newBuilder().header("Accept", "application/json")
                     if (token != null) {
                         request.header("Authorization", "Bearer $token")
                     }
                     val response = chain.proceed(request.build())
                     if (response.code == 401 && token != null) {
-                        runBlocking { settingsManager.clearRejectedToken(token) }
+                        settingsManager.clearRejectedToken(token)
                     }
                     response
                 }
