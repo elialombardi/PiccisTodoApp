@@ -6,6 +6,8 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.unit.Density
@@ -31,6 +33,7 @@ class NotesScreenTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val source = Source()
     private val controller = NotesController(source, scope)
+    private val openedUrls = mutableListOf<String>()
     private class Source : NotesDataSource {
         private val date = OffsetDateTime.parse("2026-11-10T00:40:00.123456+02:00")
         private fun note(id: Long, folder: Long, title: String) = NotesItem(id, folder, 0, title, "Styled diary body", "Separate task description",
@@ -38,7 +41,9 @@ class NotesScreenTest {
         var folders = listOf(
             NotesFolder(12, "Diary root", NotesType.DIARY, 0, null,
                 listOf(NotesFolder(13, "Nested tasks", NotesType.TASKS, 0, 12, emptyList(), listOf(note(43, 13, "Task item")))), listOf(note(42, 12, "Diary item"))),
-            NotesFolder(15, "Shopping", NotesType.BUY, 0, null, emptyList(), listOf(note(44, 15, "Buy item"))))
+            NotesFolder(15, "Shopping", NotesType.BUY, 0, null, emptyList(), listOf(note(44, 15, "Buy item"))),
+            NotesFolder(16, "References", NotesType.LINKS, 0, null, emptyList(),
+                listOf(note(45, 16, "Reference item").copy(url = "https://example.com/docs"))))
         var calls = 0
         var last: JsonObject? = null
         override suspend fun tree() = folders
@@ -46,6 +51,8 @@ class NotesScreenTest {
             calls++; last = body.deepCopy()
             val old = folders.folderRows().flatMap { it.folder.notes }.first { it.id == id }
             val saved = old.copy(title = body["title"]?.asString ?: old.title,
+                url = body["url"]?.asString ?: old.url,
+                description = if (body.has("description")) body["description"].takeUnless { it.isJsonNull }?.asString else old.description,
                 completed = body["completed"]?.asBoolean ?: old.completed,
                 endDate = if (body.has("endDate")) body["endDate"].asString.takeIf { it.isNotEmpty() } else old.endDate)
             fun walk(rows: List<NotesFolder>): List<NotesFolder> = rows.map { it.copy(children = walk(it.children), notes = it.notes.map { n -> if (n.id == id) saved else n }) }
@@ -61,7 +68,8 @@ class NotesScreenTest {
     private fun show(role: String, largeDark: Boolean = false) {
         ui.setContent {
             val density = LocalDensity.current
-            CompositionLocalProvider(LocalDensity provides Density(density.density, if (largeDark) 1.8f else density.fontScale)) {
+            CompositionLocalProvider(LocalDensity provides Density(density.density, if (largeDark) 1.8f else density.fontScale),
+                LocalUriHandler provides object : UriHandler { override fun openUri(uri: String) { openedUrls.add(uri) } }) {
                 MaterialTheme(colorScheme = if (largeDark) darkColorScheme() else lightColorScheme()) { NotesContent(controller) }
             }
         }
@@ -134,6 +142,46 @@ class NotesScreenTest {
         ui.onNodeWithText(text(R.string.notes_bold)).performScrollTo().assertExists()
         ui.onNodeWithText(text(R.string.notes_preview)).performScrollTo().assertIsDisplayed()
         screenshot("04-diary-preview-large-dark")
+    }
+    @Test fun bookmarksValidateUrlsAndSaveOnlyChangedFields() {
+        show("Writer")
+        ui.onNodeWithTag("notes_folder_16").performScrollTo().performClick()
+        ui.onAllNodes(isToggleable()).assertCountEquals(0)
+        click(R.string.notes_open_bookmark)
+        assertEquals(listOf("https://example.com/docs"), openedUrls)
+        ui.onNodeWithTag("notes_item_45").performScrollTo().performClick()
+        val editor = hasAnyAncestor(hasTestTag("notes_editor"))
+        ui.onNodeWithText(text(R.string.notes_content)).assertDoesNotExist()
+        ui.onNodeWithText(text(R.string.notes_end_date)).assertDoesNotExist()
+        ui.onAllNodes(isToggleable()).assertCountEquals(0)
+        ui.onNodeWithText(text(R.string.notes_url)).performScrollTo().performTextReplacement("javascript:alert(1)")
+        ui.onNode(hasText(text(R.string.notes_open_bookmark)) and editor).assertIsNotEnabled()
+        click(R.string.notes_save)
+        assertEquals(0, source.calls); assertTrue("url" in controller.state.value.fields)
+        ui.onNodeWithText(text(R.string.notes_url)).performScrollTo().performTextReplacement(" https://example.com/new ")
+        ui.onNodeWithText(text(R.string.notes_description)).performScrollTo().performTextClearance()
+        click(R.string.notes_save); ready()
+        assertEquals(setOf("url", "description"), source.last!!.keySet())
+        assertTrue(source.last!!["description"].isJsonNull)
+        assertEquals("https://example.com/new", controller.state.value.itemDraft!!.url)
+        assertEquals("Styled diary body", controller.state.value.itemDraft!!.content)
+        assertTrue(controller.state.value.itemDraft!!.completed)
+    }
+    @Test fun readerCanOpenBookmarkButCannotEditOrLaunchUnsafeUrls() {
+        source.folders = source.folders.map { folder ->
+            if (folder.id == 16L) folder.copy(notes = folder.notes + folder.notes.single().copy(id = 46, title = "Unsafe", url = "data:text/html,test")) else folder
+        }
+        show("Reader")
+        ui.onNodeWithTag("notes_folder_16").performScrollTo().performClick()
+        val unsafe = hasAnyAncestor(hasTestTag("notes_item_46"))
+        ui.onNode(hasText(text(R.string.notes_open_bookmark)) and unsafe).performScrollTo().assertIsNotEnabled()
+        ui.onNodeWithTag("notes_item_45").performScrollTo().performClick()
+        val editor = hasAnyAncestor(hasTestTag("notes_editor"))
+        ui.onNode(hasText(text(R.string.notes_open_bookmark)) and editor).performScrollTo().performClick()
+        assertEquals(listOf("https://example.com/docs"), openedUrls)
+        ui.onAllNodesWithText(text(R.string.notes_save)).assertCountEquals(0)
+        ui.onAllNodesWithText(text(R.string.notes_delete)).assertCountEquals(0)
+        assertEquals(0, source.calls)
     }
     @Test fun wideLayoutCanHideRestoreFoldersAndSwitchFolderClosesEditor() {
         show("Writer")

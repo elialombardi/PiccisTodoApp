@@ -60,7 +60,8 @@ class NotesControllerTest {
             val old = folders.folderRows().flatMap { it.folder.notes }.firstOrNull { it.id == id } ?: item(200, body["folderId"].asLong)
             val saved = old.copy(folderId = body["folderId"]?.asLong ?: old.folderId,
                 title = body["title"]?.asString ?: old.title, position = body["position"]?.asInt ?: old.position,
-                description = body["description"]?.asString ?: old.description, content = body["content"]?.asString ?: old.content,
+                description = if (body.has("description")) body["description"].takeUnless { it.isJsonNull }?.asString else old.description,
+                url = body["url"]?.asString ?: old.url, content = body["content"]?.asString ?: old.content,
                 endDate = if (body.has("endDate")) body["endDate"].asString.takeIf { it.isNotEmpty() } else old.endDate,
                 completed = body["completed"]?.asBoolean ?: old.completed)
             transform { folder -> folder.copy(notes = folder.notes.filterNot { it.id == saved.id } + if (folder.id == saved.folderId) listOf(saved) else emptyList()) }
@@ -128,6 +129,31 @@ class NotesControllerTest {
         c.itemInput(c.current().itemDraft!!.copy(title = "No")); c.saveItem(); c.toggle(row, false)
         c.openFolderForm(); c.requestDeleteItem(); c.confirmDelete(); advanceUntilIdle()
         assertEquals("Item 43", c.current().itemDraft!!.title); assertEquals(0, source.calls + source.deletes)
+    }
+    @Test fun bookmarksValidateCreateEditAndMoveWithoutLosingHiddenFieldsOrAllowingCompletion() = runTest {
+        val source = Source().apply { transform { if (it.id == 15L) it.copy(type = NotesType.LINKS) else it } }
+        val c = NotesController(source, this)
+        c.sessionChanged("Writer", true); advanceUntilIdle(); c.selectFolder(15); c.openItem()
+        c.itemInput(c.current().itemDraft!!.copy(title = "Reference", url = "javascript:test")); c.saveItem()
+        assertTrue("url" in c.current().fields); assertEquals(0, source.calls)
+        c.itemInput(c.current().itemDraft!!.copy(url = " https://example.com/docs ")); c.saveItem(); advanceUntilIdle()
+        assertEquals(setOf("folderId", "title", "position", "url", "description"), source.last!!.keySet())
+        assertEquals("https://example.com/docs", c.current().itemDraft!!.url)
+        assertEquals(200L, c.current().selectedItemId)
+        val before = c.current().selectedFolder!!.notes.single()
+        c.toggle(before, false); advanceUntilIdle(); assertEquals(1, source.calls)
+        c.itemInput(c.current().itemDraft!!.copy(description = "Bookmark details")); c.saveItem(); advanceUntilIdle()
+        c.itemInput(c.current().itemDraft!!.copy(description = "")); c.saveItem(); advanceUntilIdle()
+        assertEquals("{\"description\":null}", source.last.toString())
+        assertNull(c.current().selectedFolder!!.notes.single().description)
+        c.itemInput(c.current().itemDraft!!.copy(folderId = 12)); c.saveItem(); advanceUntilIdle()
+        assertEquals("{\"folderId\":12}", source.last.toString())
+        val moved = c.current().selectedFolder!!.notes.first { it.id == 200L }
+        assertEquals(before.content, moved.content); assertEquals(before.style, moved.style)
+        assertEquals(before.url, moved.url); assertEquals(before.completed, moved.completed)
+        c.sessionChanged("Reader", true); advanceUntilIdle(); c.selectFolder(12); c.openItem(moved)
+        c.itemInput(c.current().itemDraft!!.copy(url = "https://example.com/changed")); c.saveItem()
+        assertEquals(before.url, c.current().itemDraft!!.url)
     }
     @Test fun duplicateCreateAndSavedButRefreshFailedNeverReplay() = runTest {
         val source = Source(); val c = NotesController(source, this)

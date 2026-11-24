@@ -1,5 +1,69 @@
 # Notes & lists — Android integration
 
+## Contract alignment — 24 November 2026
+
+- Supports all four folder types: `buy_list`, `tasks_list`, `diary`, and `links`
+  (Bookmarks). The previous strict three-value decoder could reject the whole
+  tree if a Bookmarks folder was present; this is a confirmed client incompatibility,
+  not proof of the cause of an uninspected live error.
+- Bookmark rows show title/URL and a separate **Open bookmark** action. Editors
+  expose title, URL, nullable description, position and destination, without
+  completion, date or diary controls. Readers may open bookmarks but cannot edit.
+- Bookmark saves require an absolute HTTP(S) URL. Credentials, whitespace,
+  backslashes and other schemes are rejected before saving or opening. URLs are
+  trimmed on save/open, and absence of a browser is handled without crashing.
+  No page fetching or metadata preview is performed.
+- Response state retains nullable `description` and the `url` string (empty for
+  older responses without URL). Editors show null descriptions as blank; clearing
+  a nonempty description sends explicit JSON null. Unchanged null/legacy-empty
+  descriptions are omitted on update. Date clearing still sends an empty string.
+- Notes item bodies are sent as explicit JSON request bodies: the default shared
+  Gson converter drops null-valued members, which would otherwise silently turn
+  a description clear into an omitted field. Shared serialization for other APIs
+  is unchanged. An actual MockWebServer request verifies `{"description":null}`.
+- URL, content, description, style, date and completion survive folder conversions
+  and item moves. New Bookmarks writes omit hidden completion/style/content/date;
+  existing item updates send only changed fields. Completion is restricted to
+  Buy/Tasks in both UI and controller.
+
+### Diagnosing opening failures
+
+The only read source is authenticated `GET /api/note-folders/tree`, decoded as
+a top-level recursive array, never a wrapper or `GET /api/notes`. Empty is `[]`.
+Use the configured origin (without a duplicated `/api`) and current session.
+Check status and content type: HTML usually indicates a web/proxy fallback;
+401 requires reauthentication and may be plain text; 404/405 requires checking
+method/path/deployed version; 500 requires backend logs/migration checks.
+Network/TLS failures are not empty trees, and device localhost is not the host PC.
+Compare deployed migrations/version with the supplied contract. Capture only
+sanitized method/URL/status/content type and decoding details; never share tokens
+or private item content. No live backend response was provided for this update.
+
+### Validation — 24 November 2026
+
+- `gradlew.bat :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --console=plain`
+  passed after the explicit-null transport fix. **93 JVM tests passed**, with zero
+  failures. Lint reports **0 errors, 52 warnings and 2 hints**; the only findings
+  in changed Notes source are existing `UseKtx` suggestions in diary color parsing.
+- Added five contract tests, one controller test and two Android UI tests covering
+  nested Bookmarks, URL safety/normalization, nullable/legacy-empty descriptions,
+  actual HTTP null serialization, typed partial writes, hidden fields, moves,
+  completion rejection and read-only bookmark opening.
+- API 35 read-only emulator, small phone **360×640 dp** (720×1280 px, 320 dpi):
+  **11/11 Notes UI/reordering tests passed**. The tablet-only branch returns early
+  at phone size.
+- Same emulator, tablet **1280×800 dp** (1920×1200 px, 240 dpi): **11/11 passed**,
+  including actual hide/restore-folder-pane and folder-switch/editor checks.
+  Existing large-text/dark Diary coverage ran at both sizes. URL launching was
+  intercepted by the test rather than opening a real browser.
+- Evidence: `app/build/notes-bookmarks-final-verification.log`,
+  `app/build/notes-bookmarks-small-phone.txt`,
+  `app/build/notes-bookmarks-tablet.txt`, and the usual unit/lint reports.
+- Tests use synthetic data, not a live backend. Staging persistence/migrations,
+  real browser handoff, physical devices, API 24/37 and manual accessibility checks
+  still require release validation. No iOS target exists here. No live records
+  were imported or modified, and no new dependency was added for this update.
+
 ## Setup and scope
 
 - The existing Collections/home section is now **Notes & lists**. Login and the global start screen are unchanged. Existing Notes detail/create routes open the same typed workspace; the legacy untyped editors are no longer routed from the app.
@@ -16,7 +80,7 @@
 - The main list uses only `selectedFolder.notes`, in the server's returned order. Child and parent notes are not combined. All returned items remain available in a lazy list.
 - Phones use folder → direct items → editor navigation. At 840 dp and wider, folder-only navigation, the direct-item list and editor remain separate panes. The folder pane can be hidden/restored.
 - Root and child folder creation default independently to Diary. Folder name/type/position can be configured; mutation responses never replace cached subtrees because their children/notes are empty. Tree refresh selects the created/edited folder.
-- Buy lists show title/Purchased; task lists show title, description, optional end date/Done; Diary shows title, multiline content, whole-note style controls and preview. Position and destination folder are common controls.
+- Buy lists show title/Purchased; task lists show title, description, optional end date/Done; Diary shows title, multiline content, whole-note style controls and preview; Bookmarks shows title, HTTP(S) URL, description and Open bookmark. Position and destination folder are common controls.
 - Diary style is not HTML or rich-text spans. Controls preserve all five style properties and offer 14/16/18/20/24 font sizes; existing other font sizes are retained unless changed.
 - Numeric IDs identify folders/items. Partial PUT payloads contain changed fields only. Immediate list completion writes contain **only** `completed`, including explicit false. Unchanged hidden content, style, description, end date and completion are omitted, not reset.
 - End dates remain ISO calendar strings and never pass through UTC. Clearing sends `endDate: ""`, not null. Dates may be in the past; no date-ordering restriction is added.
@@ -29,7 +93,7 @@
 ## Reordering folders and notes (restored 10 November 2026)
 
 - Writer/Admin users can drag the reorder handle on folder cards and on direct
-  notes/items in every folder type: Diary, Buy list and Tasks list. Dragging only
+  notes/items in every folder type: Diary, Buy list, Tasks list and Bookmarks. Dragging only
   previews the order; position changes are submitted once the handle is released.
 - Tap the same handle for **Move up** / **Move down**. Equivalent screen-reader
   custom actions are available, and actions at the first/last boundary are disabled.

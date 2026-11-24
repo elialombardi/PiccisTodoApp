@@ -6,6 +6,11 @@
     <string name="notes_buy">Buy list</string>
     <string name="notes_tasks">Tasks list</string>
     <string name="notes_diary">Diary</string>
+    <string name="notes_links">Bookmarks</string>
+    <string name="notes_url">Bookmark URL</string>
+    <string name="notes_url_hint">Enter an absolute HTTP(S) URL without credentials, spaces or backslashes.</string>
+    <string name="notes_open_bookmark">Open bookmark</string>
+    <string name="notes_url_open_failed">No browser could open this bookmark.</string>
     <plurals name="notes_count"><item quantity="one">%d direct item</item><item quantity="other">%d direct items</item></plurals>
     <string name="notes_new_folder">New folder</string>
     <string name="notes_subfolder">Subfolder</string>

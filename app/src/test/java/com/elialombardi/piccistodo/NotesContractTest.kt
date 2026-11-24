@@ -41,7 +41,7 @@ class NotesContractTest {
         val cleared = NotesWrites.item(original.copy(endDate = "", description = "", completed = false), original, NotesType.TASKS)
         assertEquals("", cleared["endDate"].asString)
         assertFalse(cleared["endDate"].isJsonNull)
-        assertEquals("", cleared["description"].asString)
+        assertTrue(cleared["description"].isJsonNull)
         assertFalse(cleared["completed"].asBoolean)
         val style = NotesWrites.item(original.copy(style = original.style.copy(italic = true)), original, NotesType.DIARY)["style"].asJsonObject
         assertEquals(5, style.size()); assertTrue(style["bold"].asBoolean)
@@ -88,6 +88,62 @@ class NotesContractTest {
         assertTrue(item.localUpdated(ZoneId.of("America/Los_Angeles"), Locale.US).contains("Nov 9, 2026"))
         assertTrue(item.localUpdated(ZoneId.of("Asia/Tokyo"), Locale.US).contains("Nov 10, 2026"))
         assertEquals(123456000, item.updatedAt.nano)
+    }
+    @Test fun nestedBookmarksDecodeUrlsAndNullableFieldsWithoutRejectingTheTree() {
+        val note = json(itemJson).asJsonObject.apply {
+            addProperty("url", "https://example.com/docs?q=notes#reference")
+            add("description", com.google.gson.JsonNull.INSTANCE)
+            add("endDate", com.google.gson.JsonNull.INSTANCE)
+        }
+        val tree = NotesDecoder.tree(json("""[{"id":10,"name":"Root","type":"diary","parentId":null,"notes":[],"children":[{"id":12,"name":"Links","type":"links","parentId":10,"children":[],"notes":[$note]}]}]"""))
+        val folder = tree.single().children.single()
+        assertEquals(NotesType.LINKS, folder.type)
+        assertEquals("https://example.com/docs?q=notes#reference", folder.notes.single().url)
+        assertNull(folder.notes.single().description); assertNull(folder.notes.single().endDate)
+        assertEquals("", NotesItemDraft.from(folder.notes.single()).description)
+        assertEquals("", item.url) // Backward compatibility with pre-bookmark responses.
+        assertThrows(NotesDataException::class.java) { NotesDecoder.tree(json("""{"data":[]}""")) }
+    }
+    @Test fun bookmarkUrlsAllowOnlyAbsoluteHttpWithoutCredentialsOrUnsafeCharacters() {
+        listOf("https://example.com", " http://example.com:8080/a?b=c#d ", "HTTPS://example.com/docs").forEach {
+            assertTrue(it, notesUrlValid(it))
+        }
+        listOf("", "javascript:alert(1)", "data:text/html,test", "file:///tmp/test", "//example.com",
+            "https://", "https://user:password@example.com", "https://example.com/a b", "https://example.com/a\\b",
+            "https://example.com/a\nb", "https://example.com/a\u00a0b").forEach { assertFalse(it, notesUrlValid(it)) }
+    }
+    @Test fun bookmarksUseTypedPartialWritesAndRetainHiddenValuesAcrossConversions() {
+        val original = NotesItemDraft.from(item.copy(url = "https://example.com/original"))
+        val created = NotesWrites.item(original.copy(url = " https://example.com/new "), null, NotesType.LINKS)
+        assertEquals(setOf("folderId", "title", "position", "url", "description"), created.keySet())
+        assertEquals("https://example.com/new", created["url"].asString)
+        NotesType.entries.forEach { type ->
+            val body = NotesWrites.item(original.copy(title = "Renamed"), original, type)
+            assertEquals(setOf("title"), body.keySet())
+        }
+        assertEquals("", NotesWrites.item(original.copy(url = ""), original, NotesType.DIARY)["url"].asString)
+        val folders = listOf(NotesFolder(12, "Links", NotesType.LINKS, 0, null, emptyList(), emptyList())).folderRows()
+        assertTrue(original.copy(url = "javascript:test").errors(folders).contains("url"))
+        assertTrue(original.copy(url = "").errors(folders).contains("url"))
+        assertTrue(original.errors(folders).isEmpty())
+    }
+    @Test fun nullableAndLegacyEmptyDescriptionsArePreservedUntilEdited() {
+        listOf(null, "", "Details").forEach { description ->
+            val response = item.copy(description = description)
+            val draft = NotesItemDraft.from(response)
+            assertFalse(NotesWrites.item(draft.copy(title = "Renamed"), draft, NotesType.TASKS).has("description"))
+        }
+        val created = NotesWrites.item(NotesItemDraft(12, "Task"), null, NotesType.TASKS)
+        assertTrue(created["description"].isJsonNull)
+    }
+    @Test fun clearingDescriptionSendsExplicitNullOverHttp() = runBlocking {
+        withServer { server, source ->
+            server.enqueue(MockResponse.Builder().code(200).body(itemJson.replace("\"description\":\"Code\"", "\"description\":null")).build())
+            val original = NotesItemDraft.from(item)
+            val saved = source.saveItem(42, NotesWrites.item(original.copy(description = ""), original, NotesType.TASKS))
+            assertNull(saved.description)
+            assertEquals("{\"description\":null}", server.takeRequest().body!!.utf8())
+        }
     }
     private suspend fun withServer(block: suspend (MockWebServer, NotesHttpDataSource) -> Unit) {
         MockWebServer().use { server ->

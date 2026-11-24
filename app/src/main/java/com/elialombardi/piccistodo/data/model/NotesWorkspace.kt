@@ -3,6 +3,8 @@ package com.elialombardi.piccistodo.data.model
 import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.google.gson.JsonNull
+import java.net.URI
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -11,14 +13,15 @@ import java.time.format.FormatStyle
 import java.util.Locale
 
 enum class NotesType(val wire: String) {
-    BUY("buy_list"), TASKS("tasks_list"), DIARY("diary");
+    BUY("buy_list"), TASKS("tasks_list"), DIARY("diary"), LINKS("links");
     companion object { fun parse(value: String) = entries.firstOrNull { it.wire == value } ?: throw NotesDataException() }
 }
 data class NotesStyle(val bold: Boolean = false, val italic: Boolean = false, val textColor: String = "#1f2937",
                       val backgroundColor: String = "#ffffff", val fontSize: Int = 16)
 data class NotesItem(val id: Long, val folderId: Long, val position: Int, val title: String,
-                     val content: String, val description: String, val endDate: String?, val completed: Boolean,
-                     val style: NotesStyle, val createdAt: OffsetDateTime, val updatedAt: OffsetDateTime) {
+                     val content: String, val description: String?, val endDate: String?, val completed: Boolean,
+                     val style: NotesStyle, val createdAt: OffsetDateTime, val updatedAt: OffsetDateTime,
+                     val url: String = "") {
     fun localUpdated(zone: ZoneId = ZoneId.systemDefault(), locale: Locale = Locale.getDefault()) =
         updatedAt.atZoneSameInstant(zone).format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM).withLocale(locale))
 }
@@ -62,6 +65,14 @@ fun notesDateValid(value: String) = value.isEmpty() ||
     (value.matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}")) && runCatching { LocalDate.parse(value) }.isSuccess)
 fun notesPosition(value: String): Int? = value.takeIf { it.matches(Regex("[0-9]+")) }?.toIntOrNull()
 fun notesColorValid(value: String) = value.matches(Regex("#[0-9a-fA-F]{6}"))
+/** Apply the same restrictions before saving and before handing a URI to another app. */
+fun notesUrlValid(value: String): Boolean = runCatching {
+    val url = value.trim()
+    val uri = URI(url)
+    url.isNotEmpty() && url.none { it.isWhitespace() || Character.isSpaceChar(it) || it.isISOControl() || it == '\\' } &&
+        (uri.scheme.equals("https", true) || uri.scheme.equals("http", true)) &&
+        !uri.host.isNullOrEmpty() && uri.rawUserInfo == null
+}.getOrDefault(false)
 
 data class NotesFolderDraft(val name: String = "", val type: NotesType = NotesType.DIARY, val position: String = "0") {
     fun errors() = buildSet {
@@ -71,17 +82,18 @@ data class NotesFolderDraft(val name: String = "", val type: NotesType = NotesTy
 }
 data class NotesItemDraft(val folderId: Long, val title: String = "", val position: String = "0",
                           val content: String = "", val description: String = "", val endDate: String = "",
-                          val completed: Boolean = false, val style: NotesStyle = NotesStyle()) {
+                          val completed: Boolean = false, val style: NotesStyle = NotesStyle(), val url: String = "") {
     fun errors(folders: List<NotesFolderRow>) = buildSet {
         if (title.trim().isEmpty() || title.trim().length > 200) add("title")
         if (notesPosition(position) == null) add("position")
         if (folders.none { it.folder.id == folderId }) add("folderId")
+        if (folders.firstOrNull { it.folder.id == folderId }?.folder?.type == NotesType.LINKS && !notesUrlValid(url)) add("url")
         if (!notesDateValid(endDate)) add("endDate")
         if (!notesColorValid(style.textColor) || !notesColorValid(style.backgroundColor) || style.fontSize <= 0) add("style")
     }
     companion object {
         fun from(item: NotesItem) = NotesItemDraft(item.folderId, item.title, item.position.toString(), item.content,
-            item.description, item.endDate.orEmpty(), item.completed, item.style)
+            item.description.orEmpty(), item.endDate.orEmpty(), item.completed, item.style, item.url)
     }
 }
 
@@ -103,9 +115,15 @@ object NotesWrites {
         if (original == null || draft.position != original.position) addProperty("position", notesPosition(draft.position))
         // Existing drafts retain every field. Hidden, untouched fields are omitted, not reset.
         if ((original == null && type == NotesType.DIARY) || (original != null && draft.content != original.content)) addProperty("content", draft.content)
-        if ((original == null && type == NotesType.TASKS) || (original != null && draft.description != original.description)) addProperty("description", draft.description)
+        if ((original == null && type in setOf(NotesType.TASKS, NotesType.LINKS)) || (original != null && draft.description != original.description)) {
+            if (draft.description.isEmpty()) add("description", JsonNull.INSTANCE) else addProperty("description", draft.description)
+        }
+        if ((original == null && type == NotesType.LINKS) || (original != null && draft.url != original.url)) {
+            require(draft.url.trim().isEmpty() || notesUrlValid(draft.url))
+            addProperty("url", draft.url.trim())
+        }
         if ((original == null && type == NotesType.TASKS && draft.endDate.isNotEmpty()) || (original != null && draft.endDate != original.endDate)) addProperty("endDate", draft.endDate)
-        if ((original == null && type != NotesType.DIARY) || (original != null && draft.completed != original.completed)) addProperty("completed", draft.completed)
+        if ((original == null && type in setOf(NotesType.BUY, NotesType.TASKS)) || (original != null && draft.completed != original.completed)) addProperty("completed", draft.completed)
         if ((original == null && type == NotesType.DIARY) || (original != null && draft.style != original.style)) add("style", Gson().toJsonTree(draft.style))
     }
 }
@@ -139,10 +157,10 @@ object NotesDecoder {
         require(endDate == null || notesDateValid(endDate))
         NotesItem(obj.number("id").also { require(it > 0) }, obj.number("folderId").also { require(it > 0) },
             obj.number("position", 0).also { require(it <= Int.MAX_VALUE) }.toInt(), obj.string("title"), obj.string("content", ""),
-            obj.string("description", ""), endDate, obj.boolean("completed"),
+            obj.get("description")?.takeUnless { it.isJsonNull }?.let { obj.string("description") }, endDate, obj.boolean("completed"),
             NotesStyle(style.boolean("bold"), style.boolean("italic"), style.string("textColor", "#1f2937"),
                 style.string("backgroundColor", "#ffffff"), style.number("fontSize", 16).also { require(it in 1..Int.MAX_VALUE) }.toInt()),
-            OffsetDateTime.parse(obj.string("createdAt")), OffsetDateTime.parse(obj.string("updatedAt")))
+            OffsetDateTime.parse(obj.string("createdAt")), OffsetDateTime.parse(obj.string("updatedAt")), obj.string("url", ""))
     }
     fun folderId(json: JsonElement): Long = decode { json.asJsonObject.number("id").also { require(it > 0) } }
     fun tree(json: JsonElement): List<NotesFolder> = decode {

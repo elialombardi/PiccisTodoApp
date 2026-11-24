@@ -7,6 +7,9 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.CancellationException
 import okhttp3.ResponseBody
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.HttpException
 import retrofit2.Response
 import retrofit2.http.*
@@ -18,8 +21,8 @@ interface NotesApi {
     @Streaming @POST("api/note-folders") suspend fun createFolder(@Body body: JsonObject): Response<ResponseBody>
     @Streaming @PUT("api/note-folders/{id}") suspend fun updateFolder(@Path("id") id: Long, @Body body: JsonObject): Response<ResponseBody>
     @DELETE("api/note-folders/{id}") suspend fun deleteFolder(@Path("id") id: Long): Response<Unit>
-    @Streaming @POST("api/notes") suspend fun createItem(@Body body: JsonObject): Response<ResponseBody>
-    @Streaming @PUT("api/notes/{id}") suspend fun updateItem(@Path("id") id: Long, @Body body: JsonObject): Response<ResponseBody>
+    @Streaming @POST("api/notes") suspend fun createItem(@Body body: RequestBody): Response<ResponseBody>
+    @Streaming @PUT("api/notes/{id}") suspend fun updateItem(@Path("id") id: Long, @Body body: RequestBody): Response<ResponseBody>
     @DELETE("api/notes/{id}") suspend fun deleteItem(@Path("id") id: Long): Response<Unit>
 }
 enum class NotesFailure { AUTH, FORBIDDEN, REJECTED, DELETE_FAILED, NETWORK, SERVER, DATA, CONFIG, FOLDER_NOT_EMPTY }
@@ -78,7 +81,10 @@ class NotesHttpDataSource(private val api: () -> NotesApi) : NotesDataSource {
         return response.decodeConfirmed(NotesDecoder::folderId)
     }
     override suspend fun saveItem(id: Long?, body: JsonObject): NotesItem {
-        val response = if (id == null) api().createItem(body).expect(201) else api().updateItem(id, body).expect(200)
+        // Gson's default Retrofit writer omits JsonNull members. Description null is
+        // an explicit clear operation, so serialize this partial object verbatim.
+        val payload = body.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+        val response = if (id == null) api().createItem(payload).expect(201) else api().updateItem(id, payload).expect(200)
         return response.decodeConfirmed(NotesDecoder::item)
     }
     override suspend fun deleteFolder(id: Long) { api().deleteFolder(id).expect(204) }

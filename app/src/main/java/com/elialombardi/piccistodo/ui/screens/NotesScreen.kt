@@ -1,6 +1,7 @@
 package com.elialombardi.piccistodo.ui.screens
 
 import android.app.DatePickerDialog
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,6 +21,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -53,11 +55,13 @@ private fun typeLabel(type: NotesType) = stringResource(when (type) {
     NotesType.BUY -> R.string.notes_buy
     NotesType.TASKS -> R.string.notes_tasks
     NotesType.DIARY -> R.string.notes_diary
+    NotesType.LINKS -> R.string.notes_links
 })
 private fun typeIcon(type: NotesType) = when (type) {
     NotesType.BUY -> Icons.Outlined.ShoppingBag
     NotesType.TASKS -> Icons.Outlined.Checklist
     NotesType.DIARY -> Icons.AutoMirrored.Outlined.MenuBook
+    NotesType.LINKS -> Icons.Outlined.BookmarkBorder
 }
 @Composable
 private fun NotesProblemText(problem: NotesProblem?) {
@@ -258,6 +262,7 @@ private fun FolderNavigator(state: NotesState, controller: NotesController, modi
                                 NotesType.BUY -> colors.secondaryContainer
                                 NotesType.TASKS -> colors.tertiaryContainer
                                 NotesType.DIARY -> colors.primaryContainer
+                                NotesType.LINKS -> colors.secondaryContainer
                             }
                             Surface(color = tile, shape = MaterialTheme.shapes.medium) {
                                 Icon(typeIcon(folder.type), null, Modifier.padding(10.dp).size(24.dp))
@@ -337,6 +342,7 @@ private fun ItemPane(state: NotesState, controller: NotesController, modifier: M
                     ListItem(headlineContent = { Text(note.title) }, supportingContent = {
                         Column {
                             if (folder?.type == NotesType.DIARY) Text(stringResource(R.string.notes_updated, note.localUpdated()))
+                            else if (folder?.type == NotesType.LINKS) Text(note.url)
                             else {
                                 Text(stringResource(if (folder?.type == NotesType.BUY) {
                                     if (note.completed) R.string.notes_purchased else R.string.notes_not_purchased
@@ -347,7 +353,8 @@ private fun ItemPane(state: NotesState, controller: NotesController, modifier: M
                         }
                     }, trailingContent = {
                         Row {
-                        if (folder?.type != NotesType.DIARY) {
+                        if (folder?.type == NotesType.LINKS) OpenBookmark(note.url)
+                        if (folder?.type in setOf(NotesType.BUY, NotesType.TASKS)) {
                             val label = stringResource(if (folder?.type == NotesType.BUY) R.string.notes_purchased else R.string.notes_done)
                             val description = stringResource(R.string.notes_toggle, label, note.title)
                             Checkbox(checked = note.completed, onCheckedChange = { controller.toggle(note, it) },
@@ -420,17 +427,25 @@ private fun EditorPane(state: NotesState, controller: NotesController, modifier:
             Text(typeLabel(type), style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(draft.title, { controller.itemInput(draft.copy(title = it)) }, label = { Text(stringResource(R.string.notes_item_title)) },
                 modifier = Modifier.fillMaxWidth(), readOnly = !editable, isError = "title" in state.fields)
-            if (type == NotesType.TASKS) {
+            if (type == NotesType.LINKS) {
+                OutlinedTextField(draft.url, { controller.itemInput(draft.copy(url = it)) },
+                    label = { Text(stringResource(R.string.notes_url)) }, modifier = Modifier.fillMaxWidth(),
+                    readOnly = !editable, isError = "url" in state.fields, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    supportingText = { Text(stringResource(R.string.notes_url_hint)) })
+                OpenBookmark(draft.url)
+            }
+            if (type == NotesType.TASKS || type == NotesType.LINKS) {
                 OutlinedTextField(draft.description, { controller.itemInput(draft.copy(description = it)) }, label = { Text(stringResource(R.string.notes_description)) },
                     modifier = Modifier.fillMaxWidth(), minLines = 3, readOnly = !editable)
-                EndDateField(draft, state, controller, editable)
+                if (type == NotesType.TASKS) EndDateField(draft, state, controller, editable)
             }
-            if (type != NotesType.DIARY) {
+            if (type == NotesType.BUY || type == NotesType.TASKS) {
                 Row {
                     Checkbox(draft.completed, { controller.itemInput(draft.copy(completed = it)) }, enabled = editable)
                     Text(stringResource(if (type == NotesType.BUY) R.string.notes_purchased else R.string.notes_done), Modifier.padding(top = 12.dp))
                 }
-            } else DiaryFields(draft, state, controller, editable)
+            } else if (type == NotesType.DIARY) DiaryFields(draft, state, controller, editable)
             PositionField(draft.position, "position" in state.fields, editable) { controller.itemInput(draft.copy(position = it)) }
             Choice(stringResource(R.string.notes_destination), state.folders.firstOrNull { it.folder.id == draft.folderId }?.path.orEmpty(),
                 state.folders.map { row -> row.path to { controller.itemInput(draft.copy(folderId = row.folder.id)) } }, editable)
@@ -443,6 +458,20 @@ private fun EditorPane(state: NotesState, controller: NotesController, modifier:
         }
         TextButton(onClick = onClose, enabled = !state.saving) { Text(stringResource(R.string.notes_close)) }
     }
+}
+@Composable
+private fun OpenBookmark(url: String) {
+    val handler = LocalUriHandler.current
+    val context = LocalContext.current
+    val failure = stringResource(R.string.notes_url_open_failed)
+    TextButton(onClick = {
+        if (notesUrlValid(url)) {
+            try { handler.openUri(url.trim()) }
+            catch (_: android.content.ActivityNotFoundException) { Toast.makeText(context, failure, Toast.LENGTH_SHORT).show() }
+            catch (_: IllegalArgumentException) { Toast.makeText(context, failure, Toast.LENGTH_SHORT).show() }
+            catch (_: SecurityException) { Toast.makeText(context, failure, Toast.LENGTH_SHORT).show() }
+        }
+    }, enabled = notesUrlValid(url)) { Text(stringResource(R.string.notes_open_bookmark)) }
 }
 @Composable
 private fun PositionField(value: String, error: Boolean, editable: Boolean, onChange: (String) -> Unit) {

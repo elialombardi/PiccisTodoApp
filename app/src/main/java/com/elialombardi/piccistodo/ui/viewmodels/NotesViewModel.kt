@@ -152,7 +152,7 @@ class NotesController(private val source: NotesDataSource, private val scope: Co
     }
     fun toggle(item: NotesItem, completed: Boolean) {
         val current = state.value
-        if (!current.editable || current.dirty || current.selectedFolder?.type == NotesType.DIARY ||
+        if (!current.editable || current.dirty || current.selectedFolder?.type !in setOf(NotesType.BUY, NotesType.TASKS) ||
             current.selectedFolder?.notes?.none { it.id == item.id } != false) return
         mutate { version ->
             source.saveItem(item.id, NotesWrites.completion(completed))
